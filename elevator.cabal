@@ -1,0 +1,151 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.38.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           elevator
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/elevator#readme>
+homepage:       https://github.com/githubuser/elevator#readme
+bug-reports:    https://github.com/githubuser/elevator/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2025 Author name here
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/elevator
+
+library
+  exposed-modules:
+      Elevator
+      Elevator0
+      Elevator2
+      Elevator3
+  other-modules:
+      Paths_elevator
+  autogen-modules:
+      Paths_elevator
+  hs-source-dirs:
+      src
+  default-extensions:
+      AllowAmbiguousTypes
+      ApplicativeDo
+      BlockArguments
+      DataKinds
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      DuplicateRecordFields
+      FunctionalDependencies
+      GADTs
+      ImportQualifiedPost
+      LambdaCase
+      NoFieldSelectors
+      NamedFieldPuns
+      NoStarIsType
+      OverloadedRecordDot
+      OverloadedStrings
+      PackageImports
+      PatternSynonyms
+      QuasiQuotes
+      RecordWildCards
+      StrictData
+      TypeApplications
+  ghc-options: -Wall -Wmissing-export-lists -Wmissing-deriving-strategies -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-unused-top-binds
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , crem
+    , singletons-base
+    , time
+    , unordered-containers
+    , vector
+  default-language: GHC2021
+
+executable elevator-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_elevator
+  autogen-modules:
+      Paths_elevator
+  hs-source-dirs:
+      app
+  default-extensions:
+      AllowAmbiguousTypes
+      ApplicativeDo
+      BlockArguments
+      DataKinds
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      DuplicateRecordFields
+      FunctionalDependencies
+      GADTs
+      ImportQualifiedPost
+      LambdaCase
+      NoFieldSelectors
+      NamedFieldPuns
+      NoStarIsType
+      OverloadedRecordDot
+      OverloadedStrings
+      PackageImports
+      PatternSynonyms
+      QuasiQuotes
+      RecordWildCards
+      StrictData
+      TypeApplications
+  ghc-options: -Wall -Wmissing-export-lists -Wmissing-deriving-strategies -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , elevator
+    , time
+  default-language: GHC2021
+
+test-suite elevator-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_elevator
+  autogen-modules:
+      Paths_elevator
+  hs-source-dirs:
+      test
+  default-extensions:
+      AllowAmbiguousTypes
+      ApplicativeDo
+      BlockArguments
+      DataKinds
+      DeriveAnyClass
+      DerivingStrategies
+      DerivingVia
+      DuplicateRecordFields
+      FunctionalDependencies
+      GADTs
+      ImportQualifiedPost
+      LambdaCase
+      NoFieldSelectors
+      NamedFieldPuns
+      NoStarIsType
+      OverloadedRecordDot
+      OverloadedStrings
+      PackageImports
+      PatternSynonyms
+      QuasiQuotes
+      RecordWildCards
+      StrictData
+      TypeApplications
+  ghc-options: -Wall -Wmissing-export-lists -Wmissing-deriving-strategies -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -Wno-unused-top-binds -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , elevator
+    , hspec
+    , time
+  default-language: GHC2021
