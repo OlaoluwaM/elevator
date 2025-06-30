@@ -1,7 +1,7 @@
 # Elevator Control System
 
 > [!NOTE]
-> You probably want to look at [Elevator3.hs](./src/Elevator3.hs)
+> You probably want to look at [Elevator3.hs](./src/Elevator3.hs). Also, this README was AI generated so if it sounds loftier than it is, that's why
 
 An intelligent elevator control system written in Haskell, featuring state machine architecture, optimized instruction batching, and real-time simulation.
 
