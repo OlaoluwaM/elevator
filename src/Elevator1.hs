@@ -1,4 +1,4 @@
-module Elevator where
+module Elevator1 where
 
 import Control.Concurrent (threadDelay)
 import Data.Functor (($>))

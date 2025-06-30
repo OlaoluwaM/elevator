@@ -1,5 +1,8 @@
 # Elevator Control System
 
+> [!NOTE]
+> You probably want to look at [Elevator3.hs](./src/Elevator3.hs)
+
 An intelligent elevator control system written in Haskell, featuring state machine architecture, optimized instruction batching, and real-time simulation.
 
 ## Features
