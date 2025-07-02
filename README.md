@@ -27,7 +27,7 @@ stack build
 cd <project-dir>/src
 stack repl -- Elevator3.hs
 # Inside the GHCi repl run or similar
-> fmap fst $ (runBaseMachineT elevator highCapacityDropoffRequests) >>= (\(_,s) -> runBaseMachineT s Move)
+> runElevator <one-of-the-example-elevator-commands-in-the-file>
 ```
 
 ## Architecture
