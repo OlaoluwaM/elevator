@@ -68,6 +68,7 @@ library
     , optics
     , optics-core
     , singletons-base
+    , text
     , unordered-containers
     , vector
     , vector-algorithms

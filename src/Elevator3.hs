@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -121,6 +122,7 @@ module Elevator3 (
 import Data.Singletons.Base.TH
 
 import Crem.BaseMachine qualified as Machine
+import Data.Text.IO qualified as TIO
 import Data.Vector qualified as V
 import Data.Vector.Algorithms.Intro qualified as VA
 import Data.Vector.Generic qualified as VG
@@ -143,8 +145,9 @@ import Crem.Topology (
 
 import Data.Foldable (foldlM)
 import Data.Maybe (fromMaybe)
-
 import Data.STRef (modifySTRef, newSTRef, readSTRef)
+import Data.String (fromString)
+import Data.Text (Text)
 import Data.Tuple (swap)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
@@ -273,6 +276,16 @@ data OptimizedElevatorInstructions = OptimizedElevatorInstructions
 data ElevatorMotionState = StationaryE StationaryElevator | MovingE MovingElevator
     deriving stock (Show)
 
+class (Monad m) => MonadSimulateElevator m where
+    logElevatorMotion :: Text -> m ()
+    logOut :: (Show a) => a -> m ()
+    awaitFloorTransition :: Int -> m ()
+
+instance MonadSimulateElevator IO where
+    logElevatorMotion = TIO.putStrLn
+    logOut = TIO.putStrLn . tshow
+    awaitFloorTransition seconds = threadDelay (seconds * 1000000) -- Convert seconds to microseconds
+
 -- -------------------------------------------------------------------------- --
 --                              HELPER FUNCTIONS                             --
 -- -------------------------------------------------------------------------- --
@@ -350,6 +363,9 @@ lowCapacityThreshold = 20.0 -- Below 20% - focus on pickups
 
 highCapacityThreshold :: Double
 highCapacityThreshold = 65.0 -- Above 65% - focus on dropoffs
+
+tshow :: (Show a) => a -> Text
+tshow = fromString . show
 
 -- -------------------------------------------------------------------------- --
 --                              MAIN PROGRAM FUNCTIONS                       --
@@ -589,7 +605,7 @@ Returns: StationaryElevator ready for new passenger requests
 Input: MovingElevator with instructions to execute
 Output: StationaryElevator at final position with updated occupancy
 -}
-executeElevatorInstructions :: MovingElevator -> IO StationaryElevator
+executeElevatorInstructions :: forall m. (MonadSimulateElevator m) => MovingElevator -> m StationaryElevator
 executeElevatorInstructions movingElevator@MovingElevator{elevatorConfig, instructionsQueue = OptimizedElevatorInstructions optimizedInstructions remainingInstructions}
     -- STOP CONDITION: If there are no more tasks to do, stop the elevator
     | V.null optimizedInstructions && V.null remainingInstructions = do
@@ -598,7 +614,7 @@ executeElevatorInstructions movingElevator@MovingElevator{elevatorConfig, instru
 
     -- EXECUTION CONDITION: We have tasks to do, so let's do them
     | otherwise = do
-        print optimizedInstructions -- Show what tasks we're about to do
+        logOut optimizedInstructions -- Show what tasks we're about to do
 
         -- EXECUTE CURRENT BATCH: Go through each task in our optimized list
         newMovingElevator <-
@@ -612,17 +628,17 @@ executeElevatorInstructions movingElevator@MovingElevator{elevatorConfig, instru
                         else do
                             let distanceToTargetFloor = (.unFloor) $ abs (elevatorState.currentFloor - targetFloor)
                             let direction = elevatorState.direction
-                            putStrLn
+                            logElevatorMotion
                                 ( "Elevator is moving "
-                                    <> show direction
+                                    <> tshow direction
                                     <> " to floor "
-                                    <> show targetFloor
+                                    <> tshow targetFloor
                                     <> " from floor "
-                                    <> show elevatorState.currentFloor
+                                    <> tshow elevatorState.currentFloor
                                     <> " with a current capacity of "
-                                    <> show elevatorState.currentOccupancy
+                                    <> tshow elevatorState.currentOccupancy
                                     <> " ("
-                                    <> show instruction
+                                    <> tshow instruction
                                     <> ")"
                                 )
                             goIO distanceToTargetFloor targetFloor instruction elevatorState
@@ -644,25 +660,25 @@ executeElevatorInstructions movingElevator@MovingElevator{elevatorConfig, instru
   where
     -- \| Simulate elevator movement with floor-by-floor progression and realistic delays
     -- Recursively moves the elevator one floor at a time until reaching the target floor
-    goIO :: Int -> Floor -> ElevatorInstruction -> MovingElevator -> IO MovingElevator
+    goIO :: Int -> Floor -> ElevatorInstruction -> MovingElevator -> m MovingElevator
     goIO 0 targetFloor currentInstruction e = do
-        putStrLn ("Elevator has arrived at floor " <> show targetFloor <> "\n")
+        logElevatorMotion ("Elevator has arrived at floor " <> tshow targetFloor <> "\n")
         pure $ over #currentOccupancy (updateElevatorCapacity currentInstruction) e
     goIO remainingDistance targetFloor currentInstruction e@MovingElevator{direction = Up} = do
         let newCurrentFloor = e.currentFloor + 1
-        putStrLn ("Elevator has moved up to floor " <> show newCurrentFloor)
-        threadDelay floorTransitionDelayMicros
+        logElevatorMotion ("Elevator has moved up to floor " <> tshow newCurrentFloor)
+        awaitFloorTransition floorTransitionDelaySeconds
         goIO (remainingDistance - 1) targetFloor currentInstruction (moveUpOneFloor e)
     goIO remainingDistance targetFloor currentInstruction e@MovingElevator{direction = Down} = do
         let newCurrentFloor = e.currentFloor - 1
-        putStrLn ("Elevator has moved down to floor " <> show newCurrentFloor)
-        threadDelay floorTransitionDelayMicros
+        logElevatorMotion ("Elevator has moved down to floor " <> tshow newCurrentFloor)
+        awaitFloorTransition floorTransitionDelaySeconds
         goIO (remainingDistance - 1) targetFloor currentInstruction (moveDownOneFloor e)
 
     -- \| Handle instructions for the current floor (no movement required)
-    goSameFloor :: MovingElevator -> ElevatorInstruction -> IO MovingElevator
+    goSameFloor :: MovingElevator -> ElevatorInstruction -> m MovingElevator
     goSameFloor e currentInstruction = do
-        putStrLn ("Elevator is already at the target floor " <> show e.currentFloor <> " with a current capacity of " <> show e.currentOccupancy <> " (" <> show currentInstruction <> ")\n")
+        logElevatorMotion ("Elevator is already at the target floor " <> tshow e.currentFloor <> " with a current capacity of " <> tshow e.currentOccupancy <> " (" <> tshow currentInstruction <> ")\n")
         pure $ over #currentOccupancy (updateElevatorCapacity currentInstruction) e
 
     -- \| Update elevator passenger count based on instruction type
@@ -679,8 +695,8 @@ executeElevatorInstructions movingElevator@MovingElevator{elevatorConfig, instru
     moveDownOneFloor = over #currentFloor (subtract 1)
 
     -- \| Delay duration between floor transitions (1 second in microseconds)
-    floorTransitionDelayMicros :: Int
-    floorTransitionDelayMicros = 1_000_000
+    floorTransitionDelaySeconds :: Int
+    floorTransitionDelaySeconds = 1
 
 {- | Elevator state machine - central control system
 
@@ -722,7 +738,7 @@ Example state flow:
 6. Execute: Complete all instructions with real movement simulation
 7. Transition: MOVING → STATIONARY at floor 12
 -}
-elevatorStateMachine :: ElevatorState vertex -> BaseMachineT IO ElevatorTopology ElevatorCommand ElevatorMotionState
+elevatorStateMachine :: (MonadSimulateElevator m) => ElevatorState vertex -> BaseMachineT m ElevatorTopology ElevatorCommand ElevatorMotionState
 elevatorStateMachine initialState =
     BaseMachineT
         { initialState = InitialState initialState

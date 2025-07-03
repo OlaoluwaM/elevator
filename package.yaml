@@ -71,6 +71,7 @@ library:
     - singletons-base
     - optics
     - optics-core
+    - text
     - vector
     - vector-algorithms
 
