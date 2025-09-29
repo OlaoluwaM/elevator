@@ -1,6 +1,6 @@
 cabal-version: 2.2
 
--- This file has been generated from package.yaml by hpack version 0.38.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -77,6 +77,7 @@ library
 executable elevator-exe
   main-is: Main.hs
   other-modules:
+      Scenarios
       Paths_elevator
   autogen-modules:
       Paths_elevator
@@ -111,6 +112,7 @@ executable elevator-exe
   build-depends:
       base >=4.7 && <5
     , elevator
+    , vector
   default-language: GHC2021
 
 test-suite elevator-test

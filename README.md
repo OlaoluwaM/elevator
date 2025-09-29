@@ -24,10 +24,7 @@ stack build
 ### Running the Simulation
 
 ```bash
-cd <project-dir>/src
-stack repl -- Elevator3.hs
-# Inside the GHCi repl run or similar
-> runElevator <one-of-the-example-elevator-commands-in-the-file>
+stack run
 ```
 
 ## Architecture
@@ -113,5 +110,5 @@ let batchRequests = BatchFloorRequest $ V.fromList
 
 ## TODO (Maybe)
 
-- [ ] Add `main` program for `stack run`
+- [x] Add `main` program for `stack run`
 - [ ] Add tests

@@ -8,7 +8,7 @@
 SMART ELEVATOR CONTROL SYSTEM
 
 This module implements an intelligent elevator control system that optimizes passenger
-requests using advanced algorithms for capacity management, direction planning, and
+requests using algorithms for capacity management, direction planning, and
 distance optimization.
 
 CORE ARCHITECTURE:
@@ -33,14 +33,8 @@ INTELLIGENT FEATURES:
    - Accurate passenger count tracking
    - Comprehensive progress logging
 
-ALGORITHM EXAMPLE:
-For requests: [3→10, 5→15, 7→12] starting from floor 1:
-1. Optimize pickup order by distance: 3, 5, 7 (closest first)
-2. Optimize dropoff order by distance: 10, 12, 15 (closest first)
-3. Execute: Floor 1 → 3 (pickup) → 5 (pickup) → 7 (pickup) → 10 (dropoff) → 12 (dropoff) → 15 (dropoff)
-
 PERFORMANCE CHARACTERISTICS:
-- Uses mutable vectors with ST monad for O(1) instruction processing
+- Uses mutable vectors with ST monad for fun and low overhead instruction processing
 - Single-pass algorithms minimize computational overhead
 - Deadlock prevention ensures system reliability
 - Type-safe state transitions prevent invalid operations
@@ -77,46 +71,7 @@ module Elevator3 (
     partitionByCapacityOptimized,
     executeElevatorInstructions,
     elevatorStateMachine,
-
-    -- * Test Data and Examples
-    initialElevator,
-    elevator,
-    batchRequests,
-
-    -- * Test Suites
-    benchmarkSuite,
-    realWorldSuite,
-    edgeCaseSuite,
-    capacityOptimizationSuite,
-
-    -- * Individual Test Cases
-    emptyBatchRequests,
-    singleFloorRequestTest,
-    allSameFloorRequests,
-    allInvalidFloorRequests,
-    boundaryFloorRequests,
-    highCapacityStressTest,
-    lowCapacityOptimizationTest,
-    maxCapacityBreachTest,
-    conflictingDirectionsStressTest,
-    distanceOptimizationTest,
-    officeBuilding9AmRushTest,
-    apartmentBuildingEveningTest,
-    hospitalEmergencyTest,
-    shuttleServiceTest,
-    pathologicalWorstCaseTest,
-    smallBatchTest,
-    mediumBatchTest,
-    largeBatchTest,
-    scanAlgorithmTest,
-    allFromCurrentFloorTest,
-    allToCurrentFloorTest,
-    customBatchRequests,
-    edgeCaseRequests,
-    capacityLimitRequests,
-    overCapacityRequests,
-    highCapacityDropOffRequests,
-    mixedDirectionCapacityTest,
+    mkRunElevator,
 ) where
 
 import Data.Singletons.Base.TH
@@ -169,11 +124,7 @@ $( singletons
 
 deriving via AllVertices ElevatorVertex instance RenderableVertices ElevatorVertex
 
-{- | ELEVATOR SETUP INFORMATION
-This contains the basic rules for how the elevator works:
-- Which floors it can visit (lowest and highest)
-- How many people it can carry at once
--}
+-- | Basic configuration for our elevator works:
 data ElevatorConfig = ElevatorConfig
     { firstFloor :: Floor -- The bottom floor
     , lastFloor :: Floor -- The top floor
@@ -181,23 +132,20 @@ data ElevatorConfig = ElevatorConfig
     }
     deriving stock (Show, Generic)
 
-{- | Type-safe wrapper for floor numbers
-Prevents mixing floor numbers with other integers
--}
 newtype Floor = Floor {unFloor :: Int}
     deriving stock (Generic)
     deriving newtype (Show, Eq, Ord, Num)
 
-{- | STOPPED ELEVATOR
+{- | Stationary Elevator
 This represents an elevator that is stopped at a floor and waiting.
 It knows:
 - Where it is (current floor)
-- How many passengers are inside
-- What the elevator's rules are (config)
+- How many passengers are inside (if any)
+- What the elevator's configurations are (config)
 -}
 data StationaryElevator = StationaryElevator
     { elevatorConfig :: ElevatorConfig
-    -- ^ Elevator system configuration
+    -- ^ Elevator's configuration
     , currentFloor :: Floor
     -- ^ Current floor position
     , currentOccupancy :: Int
@@ -215,12 +163,11 @@ data MovingElevator = MovingElevator
     { currentOccupancy :: Int -- How many passengers are inside
     , currentFloor :: Floor -- Which floor it's at right now
     , direction :: Direction -- Which way it's moving (up or down)
-    , elevatorConfig :: ElevatorConfig -- The elevator's basic rules
+    , elevatorConfig :: ElevatorConfig -- The elevator's basic config
     , instructionsQueue :: OptimizedElevatorInstructions -- List of tasks to do
     }
     deriving stock (Show, Generic)
 
--- | Direction of elevator travel
 data Direction = Up | Down
     deriving stock (Show, Eq, Generic)
 
@@ -265,14 +212,14 @@ data ElevatorCommand
 Instructions are split between immediate execution and future processing
 -}
 data OptimizedElevatorInstructions = OptimizedElevatorInstructions
-    { optimized :: Vector ElevatorInstruction
+    { optimizedInstructionForExecution :: Vector ElevatorInstruction
     -- ^ Instructions for immediate execution
-    , unOptimized :: Vector ElevatorInstruction
+    , unOptimizedDeferredInstructions :: Vector ElevatorInstruction
     -- ^ Instructions deferred for later
     }
     deriving stock (Show, Eq, Generic)
 
--- | External representation of elevator state for monitoring
+-- E stands for Elevator
 data ElevatorMotionState = StationaryE StationaryElevator | MovingE MovingElevator
     deriving stock (Show)
 
@@ -290,19 +237,16 @@ instance MonadSimulateElevator IO where
 --                              HELPER FUNCTIONS                             --
 -- -------------------------------------------------------------------------- --
 
--- | Extract the target floor from an elevator instruction
 getInstructionTargetFloor :: ElevatorInstruction -> Floor
 getInstructionTargetFloor (Pickup x) = x
 getInstructionTargetFloor (DropOff x) = x
 
-{- | Determine the overall direction for a set of instructions
-Returns the direction of the first valid instruction that requires movement.
-Returns Nothing if all instructions are for the current floor.
+{- | Returns the direction of the first valid instruction that requires movement.
+    Returns Nothing if all instructions are for the current floor.
 -}
-determineADirection :: Floor -> Vector ElevatorInstruction -> Maybe Direction
-determineADirection currentFloor = safeHeadV . V.mapMaybe (determineInstructionDirection currentFloor)
+determineADirectionForElevator :: Floor -> Vector ElevatorInstruction -> Maybe Direction
+determineADirectionForElevator currentFloor = safeHeadV . V.mapMaybe (determineInstructionDirection currentFloor)
 
--- | Safely get the first element of a vector, returning Nothing if empty
 safeHeadV :: Vector a -> Maybe a
 safeHeadV v
     | V.null v = Nothing
@@ -330,16 +274,15 @@ sortByDistanceToCurrentFloor currentFloor instructions
   where
     -- Compare two tasks by their distance from current floor
     compareDistance :: ElevatorInstruction -> ElevatorInstruction -> Ordering
-    compareDistance a b = compare (distanceToCurrentFloor a) (distanceToCurrentFloor b)
+    compareDistance a b = compare (distanceFromCurrentFloor a) (distanceFromCurrentFloor b)
     -- Calculate how far a task's floor is from our current floor
-    distanceToCurrentFloor :: ElevatorInstruction -> Floor
-    distanceToCurrentFloor inst = abs (getInstructionTargetFloor inst - currentFloor)
+    distanceFromCurrentFloor :: ElevatorInstruction -> Floor
+    distanceFromCurrentFloor inst = abs (getInstructionTargetFloor inst - currentFloor)
 
 -- | Calculate current capacity as a percentage of maximum capacity
 calculateCapacityPercentage :: (HasField "currentOccupancy" a Int, HasField "elevatorConfig" a ElevatorConfig) => a -> Double
 calculateCapacityPercentage e = calculatePercentage e.currentOccupancy e.elevatorConfig.maxOccupancy
 
--- | Calculate what percentage one number represents of another
 calculatePercentage :: Int -> Int -> Double
 calculatePercentage currentOccupancy maxOccupancy =
     (fromIntegral currentOccupancy / fromIntegral maxOccupancy) * 100
@@ -395,9 +338,6 @@ floorRequestToElevatorInstruction ElevatorConfig{firstFloor, lastFloor} (FloorRe
                     else V.fromList [Pickup from, DropOff dest]
             else V.empty -- Invalid floor requests are ignored
 
-{- | Convert multiple floor requests into a flat vector of instructions
-Processes each request through floorRequestToElevatorInstruction and combines results
--}
 floorRequestsToElevatorInstructions :: ElevatorConfig -> Vector FloorRequest -> Vector ElevatorInstruction
 floorRequestsToElevatorInstructions config = V.concatMap (floorRequestToElevatorInstruction config)
 
@@ -418,17 +358,17 @@ optimizeInitialFloorRequestOrder config currentOccupancy currentFloor floorReque
      in if V.null instructions
             then Nothing -- No valid instructions to process
             else
-                let optimalDirection = fromMaybe Up $ determineADirection currentFloor instructions
+                let optimalDirection = fromMaybe Up $ determineADirectionForElevator currentFloor instructions
                  in Just $ optimizeInstructionOrder config currentOccupancy currentFloor optimalDirection instructions
 
 {- | Optimize elevator instruction order using multi-layered capacity-aware prioritization
 
-This function implements a sophisticated optimization algorithm with three layers:
+This function implements an optimization algorithm with three layers:
 
 LAYER 1 - CAPACITY-BASED INSTRUCTION FILTERING:
 - Low occupancy (≤20%): Prioritize pickups to efficiently fill the elevator
 - High occupancy (≥65%): Prioritize dropoffs to free up space for new passengers
-- Normal occupancy (20-65%): Process all instructions without type-based filtering
+- Normal occupancy (20-65%): Process all instructions indiscriminately
 
 LAYER 2 - DIRECTIONAL PARTITIONING:
 - Separate instructions by travel direction relative to current floor
@@ -437,12 +377,6 @@ LAYER 2 - DIRECTIONAL PARTITIONING:
 LAYER 3 - FINE-GRAINED CAPACITY OPTIMIZATION:
 - Apply partitionByCapacityOptimized for detailed space management
 - Sort final batch by distance from current floor for efficient movement
-
-Returns: (optimal_direction, OptimizedElevatorInstructions)
-- optimal_direction: Best direction to move (Up/Down)
-- OptimizedElevatorInstructions: Immediate batch + deferred instructions
-
-This multi-layered approach ensures both capacity efficiency and movement optimization.
 -}
 optimizeInstructionOrder :: ElevatorConfig -> Int -> Floor -> Direction -> Vector ElevatorInstruction -> (Direction, OptimizedElevatorInstructions)
 optimizeInstructionOrder config currentOccupancy currentFloor currentDirection instructions
@@ -454,7 +388,7 @@ optimizeInstructionOrder config currentOccupancy currentFloor currentDirection i
                 | otherwise = V.partition (const True) instructions
             ~(priorityInstructions, otherInstructions) = if V.null initialPriorityInstructions then swap partitionedInstructions else partitionedInstructions
             availableCapacity = config.maxOccupancy - currentOccupancy
-            targetDirection = fromMaybe currentDirection $ determineADirection currentFloor priorityInstructions
+            targetDirection = fromMaybe currentDirection $ determineADirectionForElevator currentFloor priorityInstructions
             ~(inDirectionInstructions, oppositeDirectionInstructions) = V.partition (isInTargetDirection targetDirection . getInstructionTargetFloor) priorityInstructions
             (instructionsBatch, deferredBatch) = partitionByCapacityOptimized config.maxOccupancy availableCapacity inDirectionInstructions
             sortedInstructionsBatch = sortByDistanceToCurrentFloor currentFloor instructionsBatch
@@ -479,10 +413,10 @@ optimizeInstructionOrder config currentOccupancy currentFloor currentDirection i
     capacityPercentage :: Double
     capacityPercentage = calculatePercentage currentOccupancy config.maxOccupancy
 
-{- | Advanced capacity-aware instruction partitioning using mutable vectors
+{- | Capacity-aware instruction partitioning using mutable vectors
 
 This function intelligently partitions elevator instructions based on current occupancy
-using a sophisticated priority system implemented with mutable vectors for efficiency.
+using a priority system implemented with mutable vectors for efficiency.
 
 OCCUPANCY-BASED PRIORITIZATION RULES:
 - Low occupancy (≤20%): Prioritize pickups to efficiently fill the elevator
@@ -495,78 +429,67 @@ ALGORITHM IMPLEMENTATION:
 3. Apply occupancy-based prioritization rules with space constraints
 4. Handle edge cases (no space, wrong priority) by deferring instructions
 5. Apply deadlock prevention: swap results if no instructions can be processed
-
-PERFORMANCE OPTIMIZATIONS:
-- Uses ST monad with mutable vectors for O(1) append operations
-- Processes instructions in a single pass with constant space overhead
-- Avoids expensive list concatenations and repeated vector operations
-
-Returns: (immediate_instructions, deferred_instructions)
-- immediate_instructions: Tasks that fit current capacity constraints
-- deferred_instructions: Tasks to process in subsequent batches
-
-This approach prevents capacity overflow while maximizing elevator utilization.
 -}
 partitionByCapacityOptimized :: Int -> Int -> Vector ElevatorInstruction -> (Vector ElevatorInstruction, Vector ElevatorInstruction)
 partitionByCapacityOptimized maxOccupancy availableSpaceLeft instructions = runST $ do
-    -- Initialize mutable vectors for building batches
     priorityTasksMVec <- MV.new (V.length instructions)
     deferredTasksMVec <- MV.new (V.length instructions)
 
-    let currentOccupancy = maxOccupancy - availableSpaceLeft
-        occupancyPercentage = calculatePercentage currentOccupancy maxOccupancy
-
-    -- Initialize index counters for tracking vector positions
-    priorityTaskMVecIdxRef <- newSTRef @Int 0
-    deferredTaskMVecIdxRef <- newSTRef @Int 0
+    -- Initialize counters for tracking number of elements written
+    canFitCount <- newSTRef @Int 0
+    mustDeferCount <- newSTRef @Int 0
 
     -- Process each instruction according to capacity-based rules
     foldM_
-        ( \remainingSpace instr -> case instr of
-            -- LOW OCCUPANCY CASE: Elevator nearly empty - prioritize pickups
-            -- Only process pickups when space is available and occupancy is low
-            Pickup _ | occupancyPercentage <= lowCapacityThreshold && remainingSpace > 0 -> do
-                currIdx <- readSTRef priorityTaskMVecIdxRef
-                MV.write priorityTasksMVec currIdx instr -- Add pickup to immediate batch
-                modifySTRef priorityTaskMVecIdxRef (+ 1) -- Increment position counter
-                pure (remainingSpace - 1) -- Reduce available space
+        ( \remainingSpace instr ->
+            let currentOccupancy = maxOccupancy - remainingSpace
+                occupancyPercentage = calculatePercentage currentOccupancy maxOccupancy
+             in case instr of
+                    -- LOW OCCUPANCY CASE: Elevator nearly empty - prioritize pickups
+                    -- Only process pickups when space is available and occupancy is low
+                    Pickup _ | occupancyPercentage <= lowCapacityThreshold -> do
+                        currIdx <- readSTRef canFitCount
+                        MV.write priorityTasksMVec currIdx instr -- Add pickup to immediate batch
+                        modifySTRef canFitCount (+ 1) -- Increment element count
+                        pure (remainingSpace - 1) -- Reduce available space
 
-            -- HIGH OCCUPANCY CASE: Elevator nearly full - prioritize dropoffs
-            -- Always process dropoffs when occupancy is high (they free space)
-            DropOff _ | occupancyPercentage >= highCapacityThreshold -> do
-                currIdx <- readSTRef priorityTaskMVecIdxRef
-                MV.write priorityTasksMVec currIdx instr -- Add dropoff to immediate batch
-                modifySTRef priorityTaskMVecIdxRef (+ 1) -- Increment position counter
-                pure (remainingSpace + 1) -- Increase available space
+                    -- HIGH OCCUPANCY CASE: Elevator nearly full - prioritize dropoffs
+                    -- Always process dropoffs when occupancy is high (they free space)
+                    DropOff _ | occupancyPercentage >= highCapacityThreshold -> do
+                        currIdx <- readSTRef canFitCount
+                        MV.write priorityTasksMVec currIdx instr -- Add dropoff to immediate batch
+                        modifySTRef canFitCount (+ 1) -- Increment element count
+                        pure (remainingSpace + 1) -- Increase available space
 
-            -- MEDIUM OCCUPANCY CASE: Balanced load - process both types
-            -- Handle both pickups and dropoffs if space constraints allow
-            instr' | remainingSpace > 0 && occupancyPercentage > lowCapacityThreshold && occupancyPercentage < highCapacityThreshold -> do
-                currIdx <- readSTRef priorityTaskMVecIdxRef
-                MV.write priorityTasksMVec currIdx instr' -- Add instruction to immediate batch
-                modifySTRef priorityTaskMVecIdxRef (+ 1) -- Increment position counter
-                case instr' of
-                    Pickup _ -> pure (remainingSpace - 1) -- Pickup reduces available space
-                    DropOff _ -> pure (remainingSpace + 1) -- Dropoff increases available space
+                    -- MEDIUM OCCUPANCY CASE: Balanced load - process both types
+                    -- Handle both pickups and dropoffs if space constraints allow
+                    instr' | occupancyPercentage > lowCapacityThreshold && occupancyPercentage < highCapacityThreshold -> do
+                        currIdx <- readSTRef canFitCount
+                        MV.write priorityTasksMVec currIdx instr' -- Add instruction to immediate batch
+                        modifySTRef canFitCount (+ 1) -- Increment element count
+                        case instr' of
+                            Pickup _ -> pure (remainingSpace - 1) -- Pickup reduces available space
+                            DropOff _ -> pure (remainingSpace + 1) -- Dropoff increases available space
 
-            -- DEFERRAL CASE: All other scenarios
-            -- Includes: no space available, wrong priority for current occupancy, edge cases
-            _ -> do
-                currIdx <- readSTRef deferredTaskMVecIdxRef
-                MV.write deferredTasksMVec currIdx instr -- Add to deferred batch
-                modifySTRef deferredTaskMVecIdxRef (+ 1) -- Increment position counter
-                pure remainingSpace -- Space unchanged (deferred)
+                    -- DEFERRAL CASE: All other scenarios
+                    -- Includes: no space available, wrong priority for current occupancy, edge cases
+                    _ -> do
+                        currIdx <- readSTRef mustDeferCount
+                        MV.write deferredTasksMVec currIdx instr -- Add to deferred batch
+                        modifySTRef mustDeferCount (+ 1) -- Increment element count
+                        pure remainingSpace -- Space unchanged (deferred)
         )
         availableSpaceLeft
         instructions
 
     -- Finalize batch construction
-    priorityTaskMVecIdx <- readSTRef priorityTaskMVecIdxRef -- Count of immediate instructions
-    deferredTaskMVecIdx <- readSTRef deferredTaskMVecIdxRef -- Count of deferred instructions
+    numCanFit <- readSTRef canFitCount
+    numMustDefer <- readSTRef mustDeferCount
 
     -- Convert mutable vectors to immutable vectors with exact sizing
-    priorityTasks <- V.freeze . MV.take priorityTaskMVecIdx $ priorityTasksMVec
-    deferredTasks <- V.freeze . MV.take deferredTaskMVecIdx $ deferredTasksMVec
+    -- The counts represent the number of elements written to each vector
+    priorityTasks <- V.freeze . MV.take numCanFit $ priorityTasksMVec
+    deferredTasks <- V.freeze . MV.take numMustDefer $ deferredTasksMVec
 
     -- DEADLOCK PREVENTION: Ensure progress is always possible
     -- If no instructions can be processed immediately, try deferred instructions
@@ -577,7 +500,7 @@ partitionByCapacityOptimized maxOccupancy availableSpaceLeft instructions = runS
 
 {- | Execute elevator instructions and simulate realistic movement
 
-This function implements the elevator's physical movement and task execution.
+This function implements the elevator's "physical" movement and task execution.
 It processes instructions in batches, simulating realistic elevator behavior
 with floor-by-floor movement and passenger capacity updates.
 
@@ -589,8 +512,8 @@ EXECUTION ALGORITHM:
 5. Recursively continue until all tasks are completed
 
 MOVEMENT SIMULATION:
-- Moves floor-by-floor with realistic 1-second delays between floors
-- Updates passenger count for pickups (+1) and dropoffs (-1)
+- Moves floor-by-floor with realistic delays between floors
+- Updates passenger count for pickups and dropoffs
 - Provides detailed progress logging for monitoring and debugging
 - Handles both same-floor operations and multi-floor travel
 
@@ -599,11 +522,6 @@ BATCH PROCESSING:
 - Re-optimizes remaining instructions after each batch completion
 - Considers updated elevator state (position, occupancy) for re-optimization
 - Continues until no instructions remain
-
-Returns: StationaryElevator ready for new passenger requests
-
-Input: MovingElevator with instructions to execute
-Output: StationaryElevator at final position with updated occupancy
 -}
 executeElevatorInstructions :: forall m. (MonadSimulateElevator m) => MovingElevator -> m StationaryElevator
 executeElevatorInstructions movingElevator@MovingElevator{elevatorConfig, instructionsQueue = OptimizedElevatorInstructions optimizedInstructions remainingInstructions}
@@ -712,22 +630,11 @@ COMMAND PROCESSING BY STATE:
 WHEN STATIONARY:
 - SingleFloorRequest: Validate request, plan route, transition to MOVING
 - BatchFloorRequest: Optimize multiple requests, plan route, transition to MOVING
-- Move: Ignored (cannot move without a destination)
+- Move: Ignored (cannot move without instructions)
 
 WHEN MOVING:
 - Move: Execute planned route, return to STATIONARY when complete
 - Request commands: Ignored (complete current route before accepting new requests)
-
-SAFETY AND RELIABILITY FEATURES:
-- Type-safe state transitions prevent invalid operations
-- Invalid requests are handled gracefully (elevator remains in current state)
-- Always returns to STATIONARY state after completing work
-- Uses Maybe types to handle edge cases (no valid instructions)
-
-OPTIMIZATION INTEGRATION:
-- Single requests: Basic direction determination with simple instruction queue
-- Batch requests: Full optimization algorithm with capacity-aware prioritization
-- Automatic re-optimization during execution for remaining instructions
 
 Example state flow:
 1. Start: STATIONARY at floor 1
@@ -744,30 +651,30 @@ elevatorStateMachine initialState =
         { initialState = InitialState initialState
         , action = \case
             StationaryState stationaryElevator -> \case
-                -- SINGLE PASSENGER REQUEST: One person wants to travel
                 SingleFloorRequest floorRequest ->
                     let instructions = floorRequestToElevatorInstruction stationaryElevator.elevatorConfig floorRequest
                         currentFloor = stationaryElevator.currentFloor
                      in if V.null instructions -- Check if the request is valid
                             then pureResult (StationaryE stationaryElevator) (StationaryState stationaryElevator) -- Invalid request: stay stopped
                             else -- Valid request: plan route and start moving
-                                let direction = fromMaybe Up $ determineADirection currentFloor instructions -- Determine direction (default Up)
+                                let direction = fromMaybe Up $ determineADirectionForElevator currentFloor instructions -- Determine direction (default Up)
                                     newMovingElevator =
                                         MovingElevator
                                             { currentOccupancy = stationaryElevator.currentOccupancy
                                             , currentFloor = currentFloor
                                             , direction = direction
                                             , elevatorConfig = stationaryElevator.elevatorConfig
-                                            , instructionsQueue = OptimizedElevatorInstructions{optimized = instructions, unOptimized = V.empty}
+                                            , instructionsQueue =
+                                                OptimizedElevatorInstructions
+                                                    { optimizedInstructionForExecution = instructions
+                                                    , unOptimizedDeferredInstructions = V.empty
+                                                    }
                                             }
                                  in pureResult (MovingE newMovingElevator) (MovingState newMovingElevator) -- Transition to MOVING
-
-                -- MULTIPLE PASSENGER REQUESTS: Several people want to travel (use smart planning)
                 BatchFloorRequest floorRequests ->
                     case optimizeInitialFloorRequestOrder stationaryElevator.elevatorConfig stationaryElevator.currentOccupancy stationaryElevator.currentFloor floorRequests of
                         Nothing -> pureResult (StationaryE stationaryElevator) (StationaryState stationaryElevator) -- No valid requests: stay stopped
                         Just (direction, optimizedInstructions) ->
-                            -- Valid requests: use smart planning
                             let newMovingElevator =
                                     MovingElevator
                                         { currentOccupancy = stationaryElevator.currentOccupancy
@@ -778,459 +685,29 @@ elevatorStateMachine initialState =
                                         }
                              in pureResult (MovingE newMovingElevator) (MovingState newMovingElevator) -- Transition to MOVING
 
-                -- ANY OTHER COMMAND: Stay stopped (can't move without a destination)
+                -- ANY OTHER COMMAND: Stay stopped (can't move without instructions)
                 _ -> pureResult (StationaryE stationaryElevator) (StationaryState stationaryElevator)
             MovingState movingElevator -> \case
                 -- MOVE COMMAND: Execute the planned route
                 Move -> Machine.ActionResult $ do
                     newStationaryElevator <- executeElevatorInstructions movingElevator -- Do all the planned tasks
                     pure (StationaryE newStationaryElevator, StationaryState newStationaryElevator) -- Return to STOPPED when done
+                    -- We could potentially implement commands that allow users to add floor requests on the fly to a moving elevator
+                    -- If these "on-demand" requests are placed in the "deferred pile" initially things should work without much effort
+                    -- It's just that with the way the state machine works, implementing this might be difficult since while the elevator is moving, state machine actions can be sent to it
                 _ -> pureResult (MovingE movingElevator) (MovingState movingElevator)
         }
 
--- -------------------------------------------------------------------------- --
---                             TEST SCENARIOS                                --
--- -------------------------------------------------------------------------- --
--- These are pre-made scenarios to test different aspects of the elevator system.
--- Think of them like practice problems to make sure the elevator works correctly.
-
-{- | NORMAL OFFICE BUILDING SCENARIO
-A typical day with several people wanting to travel to different floors
-This tests the basic smart planning and optimization features
--}
-batchRequests :: ElevatorCommand
-batchRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 3, toFloor = 15} -- Person at floor 3 wants to go to floor 15
-            , FloorRequest{fromFloor = 5, toFloor = 18} -- Person at floor 5 wants to go to floor 18
-            , FloorRequest{fromFloor = 2, toFloor = 12} -- Person at floor 2 wants to go to floor 12
-            , FloorRequest{fromFloor = 7, toFloor = 20} -- Person at floor 7 wants to go to floor 20
-            , FloorRequest{fromFloor = 4, toFloor = 16} -- Person at floor 4 wants to go to floor 16
-            ]
-
--- | Edge cases to test validation and error handling
-edgeCaseRequests :: ElevatorCommand
-edgeCaseRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 5, toFloor = 5} -- Person already at their destination (no movement needed)
-            , FloorRequest{fromFloor = 0, toFloor = 10} -- Invalid: Floor 0 doesn't exist in this building
-            , FloorRequest{fromFloor = 5, toFloor = 25} -- Invalid: Floor 25 doesn't exist (building only goes to 20)
-            , FloorRequest{fromFloor = -1, toFloor = 5} -- Invalid: Negative floors don't exist
-            , FloorRequest{fromFloor = 3, toFloor = 7} -- Valid request mixed in with invalid ones
-            ]
-
-{- | CAPACITY TESTING: Test exactly how many tasks the elevator can handle
-This creates exactly 6 tasks (3 passenger requests × 2 tasks each = 6 total)
-Tests the elevator's ability to handle its designed capacity
--}
-capacityLimitRequests :: ElevatorCommand
-capacityLimitRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 10} -- Instructions: [Pickup 1, DropOff 10]
-            , FloorRequest{fromFloor = 2, toFloor = 15} -- Instructions: [Pickup 2, DropOff 15]
-            , FloorRequest{fromFloor = 3, toFloor = 18} -- Instructions: [Pickup 3, DropOff 18]
-            ]
-
--- | Test case that exceeds the instruction capacity limit and forces deferrals
-overCapacityRequests :: ElevatorCommand
-overCapacityRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 8} -- Instructions: [Pickup 1, DropOff 8]
-            , FloorRequest{fromFloor = 2, toFloor = 12} -- Instructions: [Pickup 2, DropOff 12]
-            , FloorRequest{fromFloor = 3, toFloor = 15} -- Instructions: [Pickup 3, DropOff 15]
-            , FloorRequest{fromFloor = 4, toFloor = 18} -- Instructions: [Pickup 4, DropOff 18]
-            , FloorRequest{fromFloor = 5, toFloor = 20} -- Instructions: [Pickup 5, DropOff 20]
-            ] -- Total: 10 instructions (4 should be deferred)
-
--- | Test case simulating high capacity elevator with many dropOffs prioritized
-highCapacityDropOffRequests :: ElevatorCommand
-highCapacityDropOffRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 10, toFloor = 5} -- Going down (dropOff priority)
-            , FloorRequest{fromFloor = 12, toFloor = 3} -- Going down (dropOff priority)
-            , FloorRequest{fromFloor = 15, toFloor = 7} -- Going down (dropOff priority)
-            , FloorRequest{fromFloor = 13, toFloor = 3} -- Going down (dropOff priority)
-            , FloorRequest{fromFloor = 13, toFloor = 3} -- Going down (dropOff priority)
-            , FloorRequest{fromFloor = 13, toFloor = 3} -- Going down (dropOff priority)
-            , FloorRequest{fromFloor = 10, toFloor = 15} -- Going up (deferred)
-            , FloorRequest{fromFloor = 8, toFloor = 18} -- Going up (deferred)
-            , FloorRequest{fromFloor = 6, toFloor = 19} -- Going up (deferred)
-            , FloorRequest{fromFloor = 9, toFloor = 20} -- Going up (deferred)
-            ] -- When capacity > 60%, dropOffs should be prioritized
-
--- | Test case with mixed directions that will split optimized vs unoptimized
-mixedDirectionCapacityTest :: ElevatorCommand
-mixedDirectionCapacityTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 8, toFloor = 15} -- Up from current floor 1
-            , FloorRequest{fromFloor = 9, toFloor = 18} -- Up from current floor 1
-            , FloorRequest{fromFloor = 11, toFloor = 20} -- Up from current floor 1
-            , FloorRequest{fromFloor = 12, toFloor = 5} -- Down from pickup floor (wrong direction)
-            , FloorRequest{fromFloor = 13, toFloor = 3} -- Down from pickup floor (wrong direction)
-            , FloorRequest{fromFloor = 7, toFloor = 16} -- Up from current floor 1
-            , FloorRequest{fromFloor = 6, toFloor = 17} -- Up from current floor 1
-            ] -- Should split: up instructions optimized first, down instructions deferred
-
-customBatchRequests :: ElevatorCommand
-customBatchRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 9, toFloor = 1} -- Down from current floor 1
-            , FloorRequest{fromFloor = 3, toFloor = 15} -- Up from current floor 1
-            , FloorRequest{fromFloor = 5, toFloor = 18} -- Up from current floor 1
-            ] -- Mixed direction test case
-
--- | Empty batch test - should handle gracefully
-emptyBatchRequests :: ElevatorCommand
-emptyBatchRequests = BatchFloorRequest V.empty
-
--- | Single floor request test - minimal case
-singleFloorRequestTest :: ElevatorCommand
-singleFloorRequestTest = SingleFloorRequest FloorRequest{fromFloor = 5, toFloor = 15}
-
--- | All same-floor requests - should result in no instructions
-allSameFloorRequests :: ElevatorCommand
-allSameFloorRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 10, toFloor = 10}
-            , FloorRequest{fromFloor = 5, toFloor = 5}
-            , FloorRequest{fromFloor = 15, toFloor = 15}
-            , FloorRequest{fromFloor = 8, toFloor = 8}
-            ]
-
--- | All invalid floor requests - should be filtered out
-allInvalidFloorRequests :: ElevatorCommand
-allInvalidFloorRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 0, toFloor = 10} -- Invalid source (below firstFloor)
-            , FloorRequest{fromFloor = 5, toFloor = 25} -- Invalid destination (above lastFloor)
-            , FloorRequest{fromFloor = -5, toFloor = 10} -- Negative source floor
-            , FloorRequest{fromFloor = 10, toFloor = -3} -- Negative destination floor
-            , FloorRequest{fromFloor = 22, toFloor = 25} -- Both floors invalid
-            ]
-
--- | Boundary testing - floors at exact limits
-boundaryFloorRequests :: ElevatorCommand
-boundaryFloorRequests =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 20} -- Min to max floor
-            , FloorRequest{fromFloor = 20, toFloor = 1} -- Max to min floor
-            , FloorRequest{fromFloor = 1, toFloor = 2} -- Minimal valid upward journey
-            , FloorRequest{fromFloor = 20, toFloor = 19} -- Minimal valid downward journey
-            , FloorRequest{fromFloor = 10, toFloor = 11} -- Single floor up
-            , FloorRequest{fromFloor = 11, toFloor = 10} -- Single floor down
-            ]
-
--- | High capacity stress test - tests dropOff prioritization at 80% capacity
-highCapacityStressTest :: ElevatorCommand
-highCapacityStressTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 15, toFloor = 5} -- DropOff (should be prioritized)
-            , FloorRequest{fromFloor = 18, toFloor = 3} -- DropOff (should be prioritized)
-            , FloorRequest{fromFloor = 12, toFloor = 7} -- DropOff (should be prioritized)
-            , FloorRequest{fromFloor = 19, toFloor = 2} -- DropOff (should be prioritized)
-            , FloorRequest{fromFloor = 16, toFloor = 8} -- DropOff (should be prioritized)
-            , FloorRequest{fromFloor = 2, toFloor = 18} -- Pickup (should be deferred)
-            , FloorRequest{fromFloor = 4, toFloor = 19} -- Pickup (should be deferred)
-            , FloorRequest{fromFloor = 6, toFloor = 17} -- Pickup (should be deferred)
-            ] -- Use with high currentOccupancy (8/10) to test dropOff prioritization
-
--- | Low capacity optimization test - tests pickup prioritization when empty
-lowCapacityOptimizationTest :: ElevatorCommand
-lowCapacityOptimizationTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 3, toFloor = 15} -- Pickup (should be prioritized)
-            , FloorRequest{fromFloor = 5, toFloor = 18} -- Pickup (should be prioritized)
-            , FloorRequest{fromFloor = 7, toFloor = 12} -- Pickup (should be prioritized)
-            , FloorRequest{fromFloor = 2, toFloor = 20} -- Pickup (should be prioritized)
-            , FloorRequest{fromFloor = 15, toFloor = 5} -- DropOff (should be deferred - can't drop off when empty)
-            , FloorRequest{fromFloor = 18, toFloor = 8} -- DropOff (should be deferred)
-            , FloorRequest{fromFloor = 12, toFloor = 3} -- DropOff (should be deferred)
-            ] -- Use with currentOccupancy = 0 to test pickup prioritization
-
--- | Maximum capacity breach test - tests capacity constraint handling
-maxCapacityBreachTest :: ElevatorCommand
-maxCapacityBreachTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 20} -- 15 total instructions exceed capacity
-            , FloorRequest{fromFloor = 2, toFloor = 19}
-            , FloorRequest{fromFloor = 3, toFloor = 18}
-            , FloorRequest{fromFloor = 4, toFloor = 17}
-            , FloorRequest{fromFloor = 5, toFloor = 16}
-            , FloorRequest{fromFloor = 6, toFloor = 15}
-            , FloorRequest{fromFloor = 7, toFloor = 14}
-            , FloorRequest{fromFloor = 8, toFloor = 13}
-            , FloorRequest{fromFloor = 9, toFloor = 12}
-            , FloorRequest{fromFloor = 10, toFloor = 11}
-            ] -- 20 instructions total, should trigger capacity partitioning
-
--- | Conflicting directions stress test - mixed up/down requests
-conflictingDirectionsStressTest :: ElevatorCommand
-conflictingDirectionsStressTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 20} -- Long up journey
-            , FloorRequest{fromFloor = 20, toFloor = 1} -- Long down journey
-            , FloorRequest{fromFloor = 5, toFloor = 15} -- Medium up
-            , FloorRequest{fromFloor = 15, toFloor = 5} -- Medium down
-            , FloorRequest{fromFloor = 8, toFloor = 12} -- Short up
-            , FloorRequest{fromFloor = 12, toFloor = 8} -- Short down
-            , FloorRequest{fromFloor = 2, toFloor = 18} -- Long up
-            , FloorRequest{fromFloor = 18, toFloor = 2} -- Long down
-            ] -- Should test direction optimization thoroughly
-
--- | Distance optimization test - tests SCAN algorithm efficiency
-distanceOptimizationTest :: ElevatorCommand
-distanceOptimizationTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 10, toFloor = 15} -- Start from current floor (1), so pickup at 10
-            , FloorRequest{fromFloor = 12, toFloor = 18} -- Pickup at 12 (close to 10)
-            , FloorRequest{fromFloor = 8, toFloor = 16} -- Pickup at 8 (close to 10)
-            , FloorRequest{fromFloor = 14, toFloor = 20} -- Pickup at 14 (close to 12)
-            , FloorRequest{fromFloor = 6, toFloor = 17} -- Pickup at 6 (close to 8)
-            , FloorRequest{fromFloor = 19, toFloor = 5} -- Pickup at 19 (far from others)
-            , FloorRequest{fromFloor = 3, toFloor = 13} -- Pickup at 3 (close to start)
-            ] -- Should optimize pickup order: 3,6,8,10,12,14,19
-
--- | Real-world office building simulation
-officeBuilding9AmRushTest :: ElevatorCommand
-officeBuilding9AmRushTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 5} -- Lobby to office floors
-            , FloorRequest{fromFloor = 1, toFloor = 8}
-            , FloorRequest{fromFloor = 1, toFloor = 12}
-            , FloorRequest{fromFloor = 1, toFloor = 15}
-            , FloorRequest{fromFloor = 1, toFloor = 18}
-            , FloorRequest{fromFloor = 2, toFloor = 10} -- Parking level to offices
-            , FloorRequest{fromFloor = 2, toFloor = 14}
-            , FloorRequest{fromFloor = 3, toFloor = 7} -- Mixed source floors
-            , FloorRequest{fromFloor = 4, toFloor = 16}
-            ] -- Typical morning rush pattern
-
--- | Real-world apartment building evening scenario
-apartmentBuildingEveningTest :: ElevatorCommand
-apartmentBuildingEveningTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 8, toFloor = 1} -- Residents going to lobby/parking
-            , FloorRequest{fromFloor = 12, toFloor = 1}
-            , FloorRequest{fromFloor = 15, toFloor = 2}
-            , FloorRequest{fromFloor = 18, toFloor = 1}
-            , FloorRequest{fromFloor = 5, toFloor = 1}
-            , FloorRequest{fromFloor = 20, toFloor = 3}
-            , FloorRequest{fromFloor = 9, toFloor = 1}
-            , FloorRequest{fromFloor = 16, toFloor = 2}
-            ] -- Evening exodus pattern - mostly downward
-
--- | Hospital emergency scenario - mixed urgent requests
-hospitalEmergencyTest :: ElevatorCommand
-hospitalEmergencyTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 4} -- ER to surgery
-            , FloorRequest{fromFloor = 8, toFloor = 1} -- Patient room to ER
-            , FloorRequest{fromFloor = 12, toFloor = 6} -- Room to ICU
-            , FloorRequest{fromFloor = 3, toFloor = 15} -- Lab to specialist floor
-            , FloorRequest{fromFloor = 18, toFloor = 2} -- Admin to pharmacy
-            , FloorRequest{fromFloor = 7, toFloor = 4} -- Room to surgery
-            , FloorRequest{fromFloor = 1, toFloor = 20} -- ER to roof helipad
-            ] -- Mixed critical and routine requests
-
--- | Shuttle service test - repetitive pattern between key floors
-shuttleServiceTest :: ElevatorCommand
-shuttleServiceTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 10} -- Lobby to main office floor
-            , FloorRequest{fromFloor = 10, toFloor = 1} -- Return trip
-            , FloorRequest{fromFloor = 1, toFloor = 15} -- Lobby to executive floor
-            , FloorRequest{fromFloor = 15, toFloor = 1} -- Return trip
-            , FloorRequest{fromFloor = 5, toFloor = 10} -- Conference floor to main office
-            , FloorRequest{fromFloor = 10, toFloor = 5} -- Return trip
-            , FloorRequest{fromFloor = 1, toFloor = 20} -- Lobby to penthouse
-            , FloorRequest{fromFloor = 20, toFloor = 1} -- Return trip
-            ] -- Tests handling of bidirectional patterns
-
--- | Pathological worst-case scenario
-pathologicalWorstCaseTest :: ElevatorCommand
-pathologicalWorstCaseTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 20} -- Maximum distance up
-            , FloorRequest{fromFloor = 20, toFloor = 1} -- Maximum distance down
-            , FloorRequest{fromFloor = 2, toFloor = 19} -- Nearly maximum up
-            , FloorRequest{fromFloor = 19, toFloor = 2} -- Nearly maximum down
-            , FloorRequest{fromFloor = 3, toFloor = 18} -- Large up
-            , FloorRequest{fromFloor = 18, toFloor = 3} -- Large down
-            , FloorRequest{fromFloor = 4, toFloor = 17} -- Large up
-            , FloorRequest{fromFloor = 17, toFloor = 4} -- Large down
-            , FloorRequest{fromFloor = 5, toFloor = 16} -- Large up
-            , FloorRequest{fromFloor = 16, toFloor = 5} -- Large down
-            ] -- Maximum direction changes and distance
-
--- | Batch size progression tests - evaluate scalability with different request volumes
-smallBatchTest :: ElevatorCommand
-smallBatchTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 5, toFloor = 10}
-            , FloorRequest{fromFloor = 8, toFloor = 15}
-            ] -- 4 instructions total - minimal batch
-
-mediumBatchTest :: ElevatorCommand
-mediumBatchTest =
-    BatchFloorRequest $
-        V.fromList
-            [FloorRequest{fromFloor = Floor i, toFloor = Floor (i + 8)} | i <- [2, 4, 6, 8, 10, 12, 14]] -- 14 instructions - moderate batch
-
-largeBatchTest :: ElevatorCommand
-largeBatchTest =
-    BatchFloorRequest $
-        V.fromList
-            [FloorRequest{fromFloor = Floor i, toFloor = Floor ((i * 2) `mod` 20 + 1)} | i <- [1 .. 25]] -- 50 instructions - stress test
-
--- | Algorithm comparison test - specific patterns to reveal algorithm differences
-scanAlgorithmTest :: ElevatorCommand
-scanAlgorithmTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 10, toFloor = 15} -- Should be processed in SCAN order
-            , FloorRequest{fromFloor = 5, toFloor = 12}
-            , FloorRequest{fromFloor = 15, toFloor = 18}
-            , FloorRequest{fromFloor = 3, toFloor = 8}
-            , FloorRequest{fromFloor = 18, toFloor = 20}
-            , FloorRequest{fromFloor = 2, toFloor = 6}
-            ] -- Optimal SCAN order should be: 2,3,5,10,15,18
-
--- | Edge case: All pickups from current floor
-allFromCurrentFloorTest :: ElevatorCommand
-allFromCurrentFloorTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 1, toFloor = 5} -- All start from current floor (1)
-            , FloorRequest{fromFloor = 1, toFloor = 10}
-            , FloorRequest{fromFloor = 1, toFloor = 15}
-            , FloorRequest{fromFloor = 1, toFloor = 20}
-            , FloorRequest{fromFloor = 1, toFloor = 8}
-            , FloorRequest{fromFloor = 1, toFloor = 12}
-            ] -- Tests optimization when all pickups are immediate
-
--- | Edge case: All dropOffs to current floor
-allToCurrentFloorTest :: ElevatorCommand
-allToCurrentFloorTest =
-    BatchFloorRequest $
-        V.fromList
-            [ FloorRequest{fromFloor = 5, toFloor = 1} -- All end at current floor (1)
-            , FloorRequest{fromFloor = 10, toFloor = 1}
-            , FloorRequest{fromFloor = 15, toFloor = 1}
-            , FloorRequest{fromFloor = 20, toFloor = 1}
-            , FloorRequest{fromFloor = 8, toFloor = 1}
-            , FloorRequest{fromFloor = 12, toFloor = 1}
-            ] -- Tests optimization when all dropOffs are immediate
-
--- | Test suites organized by testing category
-
--- | Performance benchmarking suite - measures efficiency with various scenarios
-benchmarkSuite :: [ElevatorCommand]
-benchmarkSuite =
-    [ emptyBatchRequests
-    , singleFloorRequestTest
-    , smallBatchTest
-    , mediumBatchTest
-    , largeBatchTest
-    , conflictingDirectionsStressTest
-    , maxCapacityBreachTest
-    , pathologicalWorstCaseTest
-    ]
-
--- | Real-world scenario suite - simulates actual building usage patterns
-realWorldSuite :: [ElevatorCommand]
-realWorldSuite =
-    [ officeBuilding9AmRushTest
-    , apartmentBuildingEveningTest
-    , hospitalEmergencyTest
-    , shuttleServiceTest
-    ]
-
--- | Edge case testing suite - validates handling of unusual scenarios
-edgeCaseSuite :: [ElevatorCommand]
-edgeCaseSuite =
-    [ allSameFloorRequests
-    , allInvalidFloorRequests
-    , boundaryFloorRequests
-    , allFromCurrentFloorTest
-    , allToCurrentFloorTest
-    ]
-
-{- | Capacity optimization testing suite - validates occupancy-based prioritization
-Note: Use with different currentOccupancy values to test capacity thresholds
--}
-capacityOptimizationSuite :: [ElevatorCommand]
-capacityOptimizationSuite =
-    [ lowCapacityOptimizationTest -- Use with currentOccupancy = 0 (empty elevator)
-    , customBatchRequests -- Use with currentOccupancy = 3-5 (normal occupancy)
-    , highCapacityStressTest -- Use with currentOccupancy = 8 (80% full)
-    , maxCapacityBreachTest -- Use with currentOccupancy = 9 (90% full)
-    ]
-
--- | Default elevator configuration and instances
-
-{- | Initial elevator configuration for testing and demonstration
-Creates a 20-floor building with 10-person elevator capacity, starting at ground floor
--}
-initialElevator :: StationaryElevator
-initialElevator =
+mkInitialElevator :: ElevatorConfig -> StationaryElevator
+mkInitialElevator elevatorConfig =
     StationaryElevator
-        { elevatorConfig =
-            ElevatorConfig
-                { firstFloor = 1 -- Ground floor
-                , lastFloor = 20 -- Top floor (20-story building)
-                , maxOccupancy = 10 -- Maximum 10 passengers
-                }
+        { elevatorConfig = elevatorConfig
         , currentFloor = 1 -- Start at ground floor
         , currentOccupancy = 0 -- Start empty
         }
 
-{- | Main elevator instance ready for command processing
-Pre-configured state machine initialized with default elevator settings
--}
-elevator :: BaseMachineT IO ElevatorTopology ElevatorCommand ElevatorMotionState
-elevator = elevatorStateMachine (StationaryState initialElevator)
+mkElevatorStateMachine :: StationaryElevator -> BaseMachineT IO ElevatorTopology ElevatorCommand ElevatorMotionState
+mkElevatorStateMachine elevator = elevatorStateMachine (StationaryState elevator)
 
-{- | Execute a complete elevator operation cycle
-
-This function provides a convenient interface to run the elevator system with a single command.
-It handles the full operation cycle: receiving a command, processing it, and executing movement.
-
-OPERATION FLOW:
-1. Send the command to the elevator state machine (transitions to MOVING if valid)
-2. Send a Move command to execute the planned route
-3. Return the final elevator state after completion
-
-USAGE EXAMPLES:
-- runElevator batchRequests >>= print  -- Process multiple floor requests
-- runElevator singleFloorRequestTest   -- Handle a single passenger request
-- runElevator emptyBatchRequests       -- Test empty request handling
-
-INPUT: Any ElevatorCommand (SingleFloorRequest, BatchFloorRequest, or Move)
-OUTPUT: Final ElevatorMotionState showing elevator position and status
-
-NOTE: This function automatically sends a Move command after the initial command,
-so it's designed for complete end-to-end testing rather than step-by-step control.
--}
-runElevator :: ElevatorCommand -> IO ElevatorMotionState
-runElevator cmd = fmap fst $ Machine.runBaseMachineT elevator cmd >>= (\(_, s) -> Machine.runBaseMachineT s Move)
+mkRunElevator :: ElevatorConfig -> ElevatorCommand -> IO ElevatorMotionState
+mkRunElevator elevatorConfig cmd = fmap fst $ Machine.runBaseMachineT (mkElevatorStateMachine (mkInitialElevator elevatorConfig)) cmd >>= (\(_, s) -> Machine.runBaseMachineT s Move)
