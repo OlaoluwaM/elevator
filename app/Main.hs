@@ -138,7 +138,7 @@ runScenario choice =
                 , lastFloor = 20 -- Top floor (20-story building)
                 , maxOccupancy = 10 -- Maximum 10 passengers
                 }
-        runElevator = mkRunElevator elevatorConfig
+        runElevator = mkRunElevator elevatorConfig Nothing
      in case getScenario choice of
             Nothing -> putStrLn "❌ Invalid choice. Please try again."
             Just scenario -> do

@@ -698,16 +698,35 @@ elevatorStateMachine initialState =
                 _ -> pureResult (MovingE movingElevator) (MovingState movingElevator)
         }
 
-mkInitialElevator :: ElevatorConfig -> StationaryElevator
-mkInitialElevator elevatorConfig =
+mkInitialElevator :: ElevatorConfig -> Maybe Floor -> StationaryElevator
+mkInitialElevator elevatorConfig mInitialFloor =
     StationaryElevator
         { elevatorConfig = elevatorConfig
-        , currentFloor = 1 -- Start at ground floor
+        , currentFloor = fromMaybe elevatorConfig.firstFloor mInitialFloor
         , currentOccupancy = 0 -- Start empty
         }
 
 mkElevatorStateMachine :: StationaryElevator -> BaseMachineT IO ElevatorTopology ElevatorCommand ElevatorMotionState
 mkElevatorStateMachine elevator = elevatorStateMachine (StationaryState elevator)
 
-mkRunElevator :: ElevatorConfig -> ElevatorCommand -> IO ElevatorMotionState
-mkRunElevator elevatorConfig cmd = fmap fst $ Machine.runBaseMachineT (mkElevatorStateMachine (mkInitialElevator elevatorConfig)) cmd >>= (\(_, s) -> Machine.runBaseMachineT s Move)
+mkRunElevator :: ElevatorConfig -> Maybe Floor -> ElevatorCommand -> IO ElevatorMotionState
+mkRunElevator elevatorConfig mInitialFloor cmd = fmap fst $ Machine.runBaseMachineT (mkElevatorStateMachine (mkInitialElevator elevatorConfig mInitialFloor)) cmd >>= (\(_, s) -> Machine.runBaseMachineT s Move)
+
+sampleElevatorConfig :: ElevatorConfig
+sampleElevatorConfig =
+    ElevatorConfig
+        { firstFloor = 1
+        , lastFloor = 10
+        , maxOccupancy = 20
+        }
+
+recentBuildingExample :: ElevatorCommand
+recentBuildingExample =
+    BatchFloorRequest $
+        V.fromList
+            [ FloorRequest{fromFloor = 6, toFloor = 1}
+            , FloorRequest{fromFloor = 3, toFloor = 5}
+            ]
+
+runElevator :: ElevatorCommand -> IO ElevatorMotionState
+runElevator = mkRunElevator sampleElevatorConfig (Just 5)
